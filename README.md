@@ -21,7 +21,7 @@ Die Konvertierung basiert auf den XSLT-Stylesheets des Projekts [inspire-dcat-de
 ### Schritt 1 — Repository herunterladen
 
 ```bash
-git clone https://github.com/KULLANICI_ADIN/iso2dcat.git
+git clone https://github.com/USER_NAME/iso2dcat.git
 cd iso2dcat
 ```
 
