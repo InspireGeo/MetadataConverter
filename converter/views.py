@@ -1,0 +1,107 @@
+from django.shortcuts import render
+from django.http import HttpResponse, JsonResponse
+from lxml import etree
+import saxonche
+import os
+import tempfile
+
+XSL_DIR = os.path.join(os.path.dirname(__file__), 'xsl')
+XSL_PATH = os.path.join(XSL_DIR, 'iso2dcat.xsl')
+DCAT2ISO_XSL_PATH = os.path.join(XSL_DIR, 'dcat2iso.xsl')
+
+
+def index(request):
+    return render(request, 'converter/index.html')
+
+
+def iso2dcat(request):
+    return render(request, 'converter/iso2dcat.html')
+
+
+def dcat2iso(request):
+    return render(request, 'converter/dcat2iso.html')
+
+
+def convert_iso2dcat(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Nur POST erlaubt.'}, status=405)
+
+    uploaded_file = request.FILES.get('iso_file')
+    if not uploaded_file:
+        return render(request, 'converter/iso2dcat.html', {'error': 'Bitte eine XML-Datei hochladen.'})
+
+    if not uploaded_file.name.endswith('.xml'):
+        return render(request, 'converter/iso2dcat.html', {'error': 'Nur XML-Dateien werden akzeptiert.'})
+
+    try:
+        xml_content = uploaded_file.read()
+        xml_doc = etree.fromstring(xml_content)
+
+        prev_dir = os.getcwd()
+        os.chdir(XSL_DIR)
+        try:
+            xsl_doc = etree.parse('iso2dcat.xsl')
+            transform = etree.XSLT(xsl_doc)
+            result = transform(xml_doc)
+        finally:
+            os.chdir(prev_dir)
+
+        rdf_bytes = etree.tostring(result, pretty_print=True, xml_declaration=True, encoding='UTF-8')
+
+        filename = os.path.splitext(uploaded_file.name)[0] + '_dcat.rdf'
+        response = HttpResponse(rdf_bytes, content_type='application/rdf+xml')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.set_cookie('fileDownload', 'true', max_age=60)
+        return response
+
+    except etree.XMLSyntaxError as e:
+        return render(request, 'converter/iso2dcat.html', {'error': f'XML-Fehler: {e}'})
+    except etree.XSLTError as e:
+        return render(request, 'converter/iso2dcat.html', {'error': f'XSLT-Fehler: {e}'})
+    except Exception as e:
+        return render(request, 'converter/iso2dcat.html', {'error': f'Fehler: {e}'})
+
+
+def convert_dcat2iso(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Nur POST erlaubt.'}, status=405)
+
+    uploaded_file = request.FILES.get('dcat_file')
+    if not uploaded_file:
+        return render(request, 'converter/dcat2iso.html', {'error': 'Bitte eine RDF/XML-Datei hochladen.'})
+
+    if not (uploaded_file.name.endswith('.rdf') or uploaded_file.name.endswith('.xml')):
+        return render(request, 'converter/dcat2iso.html', {'error': 'Nur RDF/XML-Dateien (.rdf, .xml) werden akzeptiert.'})
+
+    try:
+        file_content = uploaded_file.read()
+
+        with tempfile.NamedTemporaryFile(suffix='.rdf', delete=False) as tmp_in:
+            tmp_in.write(file_content)
+            tmp_in_path = tmp_in.name
+
+        tmp_out_path = tmp_in_path + '_out.xml'
+
+        try:
+            with saxonche.PySaxonProcessor(license=False) as proc:
+                xslt_proc = proc.new_xslt30_processor()
+                xslt_proc.set_cwd(XSL_DIR)
+                executable = xslt_proc.compile_stylesheet(stylesheet_file=DCAT2ISO_XSL_PATH)
+                executable.set_initial_match_selection(file_name=tmp_in_path)
+                executable.apply_templates_returning_file(output_file=tmp_out_path)
+
+            with open(tmp_out_path, 'rb') as f:
+                xml_bytes = f.read()
+        finally:
+            os.unlink(tmp_in_path)
+            if os.path.exists(tmp_out_path):
+                os.unlink(tmp_out_path)
+
+        filename = os.path.splitext(uploaded_file.name)[0] + '_iso.xml'
+        response = HttpResponse(xml_bytes, content_type='application/xml')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.set_cookie('fileDownload', 'true', max_age=60)
+        return response
+
+    except Exception as e:
+        return render(request, 'converter/dcat2iso.html', {'error': f'Fehler: {e}'})

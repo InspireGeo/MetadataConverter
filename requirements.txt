@@ -1,0 +1,6 @@
+asgiref==3.11.1
+Django==5.2.13
+lxml==6.0.4
+python-dotenv==1.2.2
+saxonche==12.9.0
+sqlparse==0.5.5
