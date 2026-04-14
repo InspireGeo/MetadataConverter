@@ -1,4 +1,4 @@
-# ISO2DCAT — Metadaten-Konverter
+# ISO2DCAT — Metadaten-Converter
 
 Ein webbasiertes Werkzeug zur Konvertierung von Geodaten-Metadaten zwischen **ISO 19139** und **DCAT-AP** Formaten.
 
