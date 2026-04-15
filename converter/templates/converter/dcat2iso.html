@@ -94,16 +94,45 @@
   {% endif %}
 
   <div class="upload-card mb-4">
-    <h5 class="fw-semibold mb-3"><i class="fa-solid fa-upload me-2 text-success"></i>DCAT-AP RDF/XML-Datei hochladen</h5>
+    <h5 class="fw-semibold mb-3"><i class="fa-solid fa-upload me-2 text-success"></i>DCAT-AP RDF/XML — Datei oder URL</h5>
 
     <form method="post" action="{% url 'convert_dcat2iso' %}" enctype="multipart/form-data" id="convertForm">
       {% csrf_token %}
-      <div class="drop-zone mb-3" id="dropZone">
-        <i class="fa-regular fa-file-code mb-2"></i>
-        <div>RDF/XML-Datei hierher ziehen oder <strong>klicken</strong></div>
-        <div class="file-name" id="fileName">Keine Datei ausgewählt</div>
-        <input type="file" name="dcat_file" id="fileInput" accept=".rdf,.xml" class="d-none" required>
+
+      <!-- Tab seçimi -->
+      <ul class="nav nav-tabs mb-3" id="inputTabs">
+        <li class="nav-item">
+          <button class="nav-link active" type="button" id="tabFile" onclick="switchTab('file')">
+            <i class="fa-solid fa-file-arrow-up me-1"></i>Datei hochladen
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" type="button" id="tabUrl" onclick="switchTab('url')">
+            <i class="fa-solid fa-link me-1"></i>URL angeben
+          </button>
+        </li>
+      </ul>
+
+      <!-- Dosya yükleme -->
+      <div id="panelFile">
+        <div class="drop-zone mb-3" id="dropZone">
+          <i class="fa-regular fa-file-code mb-2"></i>
+          <div>RDF/XML-Datei hierher ziehen oder <strong>klicken</strong></div>
+          <div class="file-name" id="fileName">Keine Datei ausgewählt</div>
+          <input type="file" name="dcat_file" id="fileInput" accept=".rdf,.xml" class="d-none">
+        </div>
       </div>
+
+      <!-- URL girişi -->
+      <div id="panelUrl" style="display:none;">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">DCAT-AP RDF/XML URL</label>
+          <input type="url" name="dcat_url" id="urlInput" class="form-control"
+                 placeholder="https://example.com/metadata.rdf">
+          <div class="form-text">Direkt erreichbare URL einer DCAT-AP RDF/XML-Datei</div>
+        </div>
+      </div>
+
       <div class="d-flex justify-content-end">
         <button type="submit" class="btn btn-convert" id="submitBtn">
           <i class="fa-solid fa-gears me-2"></i>Konvertieren &amp; Herunterladen
@@ -127,6 +156,15 @@
   const fileInput = document.getElementById('fileInput');
   const fileName = document.getElementById('fileName');
   const submitBtn = document.getElementById('submitBtn');
+  let activeTab = 'file';
+
+  function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('panelFile').style.display = tab === 'file' ? '' : 'none';
+    document.getElementById('panelUrl').style.display  = tab === 'url'  ? '' : 'none';
+    document.getElementById('tabFile').classList.toggle('active', tab === 'file');
+    document.getElementById('tabUrl').classList.toggle('active', tab === 'url');
+  }
 
   dropZone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
@@ -141,7 +179,17 @@
     if (files.length > 0) { fileInput.files = files; fileName.textContent = files[0].name; }
   });
 
-  document.getElementById('convertForm').addEventListener('submit', () => {
+  document.getElementById('convertForm').addEventListener('submit', (e) => {
+    if (activeTab === 'file' && fileInput.files.length === 0) {
+      e.preventDefault();
+      alert('Bitte eine RDF/XML-Datei auswählen.');
+      return;
+    }
+    if (activeTab === 'url' && !document.getElementById('urlInput').value.trim()) {
+      e.preventDefault();
+      alert('Bitte eine URL eingeben.');
+      return;
+    }
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Wird konvertiert...';
 
