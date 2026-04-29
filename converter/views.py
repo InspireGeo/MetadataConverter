@@ -9,6 +9,7 @@ import urllib.error
 from urllib.parse import urlparse
 from pyshacl import validate as shacl_validate
 from rdflib import Graph, RDF, URIRef, BNode, Namespace
+from lxml import etree
 
 XSL_DIR = os.path.join(os.path.dirname(__file__), 'xsl')
 ISO2DCAT_XSL_PATH = os.path.join(XSL_DIR, 'geodcat-ap.xsl')
@@ -16,6 +17,51 @@ DCAT2ISO_XSL_PATH = os.path.join(XSL_DIR, 'dcat2iso.xsl')
 SHACL_PATH = os.path.join(os.path.dirname(__file__), 'shacl', 'dcat-ap-SHACL.ttl')
 
 SH = Namespace('http://www.w3.org/ns/shacl#')
+
+
+def _normalize_rdf(rdf_bytes):
+    """RDF/XML'den dcat:Dataset elementini root olarak çıkarır.
+
+    dcat2iso.xsl dcat:Dataset'in root element olmasını bekler.
+    rdf:Description[rdf:type=dcat:Dataset] de dcat:Dataset'e dönüştürülür.
+    """
+    DCAT_NS = 'http://www.w3.org/ns/dcat#'
+    RDF_NS  = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+
+    try:
+        root = etree.fromstring(rdf_bytes)
+    except etree.XMLSyntaxError:
+        return rdf_bytes
+
+    nsmap = {'rdf': RDF_NS, 'dcat': DCAT_NS}
+
+    # rdf:Description[rdf:type=dcat:Dataset] → dcat:Dataset
+    for desc in root.findall('.//rdf:Description', nsmap):
+        types = desc.findall('rdf:type', nsmap)
+        is_dataset = any(
+            t.get(f'{{{RDF_NS}}}resource') == f'{DCAT_NS}Dataset'
+            for t in types
+        )
+        if is_dataset:
+            desc.tag = f'{{{DCAT_NS}}}Dataset'
+            for t in types:
+                if t.get(f'{{{RDF_NS}}}resource') == f'{DCAT_NS}Dataset':
+                    desc.remove(t)
+
+    # dcat:Dataset zaten root ise değiştirme
+    if root.tag == f'{{{DCAT_NS}}}Dataset':
+        return rdf_bytes
+
+    # dcat:Dataset'i rdf:RDF içinden çıkar, root yap
+    dataset = root.find(f'.//{{{DCAT_NS}}}Dataset')
+    if dataset is not None:
+        # rdf:RDF'deki namespace'leri Dataset'e aktar
+        for prefix, uri in root.nsmap.items():
+            if prefix not in dataset.nsmap:
+                dataset.nsmap[prefix] = uri
+        return etree.tostring(dataset, encoding='utf-8', xml_declaration=True)
+
+    return rdf_bytes
 
 
 def _short(uri):
@@ -244,6 +290,8 @@ def convert_dcat2iso(request):
 
         if not file_content or not file_content.strip():
             return render(request, 'converter/dcat2iso.html', {'error': 'Die Datei ist leer.'})
+
+        file_content = _normalize_rdf(file_content)
 
         with tempfile.NamedTemporaryFile(suffix='.rdf', delete=False) as tmp_in:
             tmp_in.write(file_content)

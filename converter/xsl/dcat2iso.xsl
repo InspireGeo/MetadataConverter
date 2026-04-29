@@ -579,13 +579,13 @@
     <!--POLYGON ((-74.0000 4.7500, -74.0000 4.5000, -74.2000 4.5000, -74.2000 4.7500, -74.0000 4.7500))-->
     <!--{"type":"Polygon","coordinates":[[[-74,4.75],[-74,4.5],[-74.2,4.5],[-74.2,4.75],[-74,4.75]]]}-->
 
-    <!--[?28.?08.?2018 13:51]  Antje Kügeler:-->
+    <!--[?28.?08.?2018 13:51]  Antje Kï¿½geler:-->
     <!--https://geoviewertest.sachsen.de/mapviewer2/resources/apps/egov/devdocumentation/index.html-->
 
-    <!--[?28.?08.?2018 13:51]  Antje Kügeler:-->
+    <!--[?28.?08.?2018 13:51]  Antje Kï¿½geler:-->
     <!--https://geoviewertest.sachsen.de/mapviewer2/resources/apps/egov/devdocumentation/integrationapi_export.html?lang=de-->
 
-    <!--[?28.?08.?2018 13:58]  Antje Kügeler:-->
+    <!--[?28.?08.?2018 13:58]  Antje Kï¿½geler:-->
     <!--https://svn-host41.eggits.net/!/#PRJ_LVA_GeosSN_Zentrale_Komponenten/view/head/Entwicklung/Geoviewer2/-->
 
     <!--https://geoviewer.sachsen.de/mapviewer2/resources/apps/egov/devdocumentation/integrationapi_export.html?lang=de-->
