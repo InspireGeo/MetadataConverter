@@ -1,16 +1,98 @@
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
-from lxml import etree
 import saxonche
 import os
+import io
 import tempfile
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
+from pyshacl import validate as shacl_validate
+from rdflib import Graph, RDF, URIRef, BNode, Namespace
 
 XSL_DIR = os.path.join(os.path.dirname(__file__), 'xsl')
-XSL_PATH = os.path.join(XSL_DIR, 'iso2dcat.xsl')
+ISO2DCAT_XSL_PATH = os.path.join(XSL_DIR, 'geodcat-ap.xsl')
 DCAT2ISO_XSL_PATH = os.path.join(XSL_DIR, 'dcat2iso.xsl')
+SHACL_PATH = os.path.join(os.path.dirname(__file__), 'shacl', 'dcat-ap-SHACL.ttl')
+
+SH = Namespace('http://www.w3.org/ns/shacl#')
+
+
+def _short(uri):
+    return str(uri).split('/')[-1].split('#')[-1] if uri else '—'
+
+
+def _run_shacl(rdf_bytes):
+    """RDF/XML baytlarını DCAT-AP SHACL ile doğrula. Geçen alanları da döndürür."""
+    data_graph = Graph()
+    data_graph.parse(io.BytesIO(rdf_bytes), format='xml')
+
+    shacl_graph = Graph()
+    shacl_graph.parse(SHACL_PATH, format='turtle')
+
+    conforms, report_graph, _ = shacl_validate(
+        io.BytesIO(rdf_bytes),
+        shacl_graph=SHACL_PATH,
+        data_graph_format='xml',
+        shacl_graph_format='turtle',
+        inference='none',
+        abort_on_first=False,
+    )
+
+    # Violation/warning kayıtları (focus, path_uri) anahtarıyla
+    violation_map = {}
+    for result in report_graph.subjects(RDF.type, SH.ValidationResult):
+        severity = report_graph.value(result, SH.resultSeverity)
+        focus = str(report_graph.value(result, SH.focusNode) or '')
+        path = str(report_graph.value(result, SH.resultPath) or '')
+        message = str(report_graph.value(result, SH.resultMessage) or '')
+        value = report_graph.value(result, SH.value)
+
+        entry = {
+            'focus': focus or '—',
+            'path': _short(path),
+            'path_uri': path,
+            'message': message,
+            'value': str(value) if value else '—',
+            'status': 'violation' if severity == SH.Violation else 'warning',
+        }
+        violation_map[(focus, path)] = entry
+
+    # SHACL shape'lerinden targetClass → property path listesi çıkar
+    class_paths = {}
+    for node_shape, _, target_class in shacl_graph.triples((None, SH.targetClass, None)):
+        if target_class not in class_paths:
+            class_paths[target_class] = set()
+        for prop_shape in shacl_graph.objects(node_shape, SH.property):
+            path = shacl_graph.value(prop_shape, SH.path)
+            if isinstance(path, URIRef):
+                class_paths[target_class].add(str(path))
+
+    # Geçen alanları topla
+    seen = {(e['focus'], e['path_uri']) for e in violation_map.values()}
+    passes = []
+
+    for target_class, paths in class_paths.items():
+        for instance in data_graph.subjects(RDF.type, target_class):
+            focus = str(instance)
+            for path_uri in sorted(paths):
+                if (focus, path_uri) in seen:
+                    continue
+                seen.add((focus, path_uri))
+                values = list(data_graph.objects(instance, URIRef(path_uri)))
+                passes.append({
+                    'focus': focus,
+                    'path': _short(path_uri),
+                    'path_uri': path_uri,
+                    'message': '—',
+                    'value': str(values[0]) if values else '(kein Wert)',
+                    'status': 'pass',
+                })
+
+    violations = [e for e in violation_map.values() if e['status'] == 'violation']
+    warnings = [e for e in violation_map.values() if e['status'] == 'warning']
+
+    return conforms, violations, warnings, passes
 
 
 def _fetch_url(url):
@@ -27,6 +109,45 @@ def _fetch_url(url):
 
 def index(request):
     return render(request, 'converter/index.html')
+
+
+def validate(request):
+    if request.method == 'GET':
+        return render(request, 'converter/validate.html')
+
+    uploaded_file = request.FILES.get('rdf_file')
+    source_url = request.POST.get('rdf_url', '').strip()
+
+    if not uploaded_file and not source_url:
+        return render(request, 'converter/validate.html', {'error': 'Bitte eine RDF-Datei hochladen oder eine URL angeben.'})
+
+    try:
+        if source_url:
+            rdf_bytes, _ = _fetch_url(source_url)
+        else:
+            rdf_bytes = uploaded_file.read()
+
+        if not rdf_bytes or not rdf_bytes.strip():
+            return render(request, 'converter/validate.html', {'error': 'Die Datei ist leer.'})
+
+        conforms, violations, warnings, passes = _run_shacl(rdf_bytes)
+
+        return render(request, 'converter/validate.html', {
+            'conforms': conforms,
+            'violations': violations,
+            'warnings': warnings,
+            'passes': passes,
+            'violation_count': len(violations),
+            'warning_count': len(warnings),
+            'pass_count': len(passes),
+        })
+
+    except ValueError as e:
+        return render(request, 'converter/validate.html', {'error': str(e)})
+    except urllib.error.URLError as e:
+        return render(request, 'converter/validate.html', {'error': f'URL-Fehler: {e.reason}'})
+    except Exception as e:
+        return render(request, 'converter/validate.html', {'error': f'Fehler: {e}'})
 
 
 def iso2dcat(request):
@@ -61,20 +182,33 @@ def convert_iso2dcat(request):
             xml_content = uploaded_file.read()
             base_name = os.path.splitext(uploaded_file.name)[0]
 
-        xml_doc = etree.fromstring(xml_content)
+        if not xml_content or not xml_content.strip():
+            return render(request, 'converter/iso2dcat.html', {'error': 'Die Datei ist leer.'})
 
-        prev_dir = os.getcwd()
-        os.chdir(XSL_DIR)
+        with tempfile.NamedTemporaryFile(suffix='.xml', delete=False) as tmp_in:
+            tmp_in.write(xml_content)
+            tmp_in.flush()
+            os.fsync(tmp_in.fileno())
+            tmp_in_path = tmp_in.name
+
+        tmp_out_path = tmp_in_path + '_out.rdf'
+
         try:
-            xsl_doc = etree.parse('iso2dcat.xsl')
-            transform = etree.XSLT(xsl_doc)
-            result = transform(xml_doc)
+            with saxonche.PySaxonProcessor(license=False) as proc:
+                xslt_proc = proc.new_xslt30_processor()
+                xslt_proc.set_cwd(XSL_DIR)
+                executable = xslt_proc.compile_stylesheet(stylesheet_file=ISO2DCAT_XSL_PATH)
+                executable.set_parameter('profile', proc.make_string_value('core'))
+                executable.transform_to_file(source_file=tmp_in_path, output_file=tmp_out_path)
+
+            with open(tmp_out_path, 'rb') as f:
+                rdf_bytes = f.read()
         finally:
-            os.chdir(prev_dir)
+            os.unlink(tmp_in_path)
+            if os.path.exists(tmp_out_path):
+                os.unlink(tmp_out_path)
 
-        rdf_bytes = etree.tostring(result, pretty_print=True, xml_declaration=True, encoding='UTF-8')
-
-        filename = base_name + '_dcat.rdf'
+        filename = base_name + '_geodcat.rdf'
         response = HttpResponse(rdf_bytes, content_type='application/rdf+xml')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response.set_cookie('fileDownload', 'true', max_age=60)
@@ -84,10 +218,6 @@ def convert_iso2dcat(request):
         return render(request, 'converter/iso2dcat.html', {'error': str(e)})
     except urllib.error.URLError as e:
         return render(request, 'converter/iso2dcat.html', {'error': f'URL-Fehler: {e.reason}'})
-    except etree.XMLSyntaxError as e:
-        return render(request, 'converter/iso2dcat.html', {'error': f'XML-Fehler: {e}'})
-    except etree.XSLTError as e:
-        return render(request, 'converter/iso2dcat.html', {'error': f'XSLT-Fehler: {e}'})
     except Exception as e:
         return render(request, 'converter/iso2dcat.html', {'error': f'Fehler: {e}'})
 
@@ -112,8 +242,13 @@ def convert_dcat2iso(request):
             file_content = uploaded_file.read()
             base_name = os.path.splitext(uploaded_file.name)[0]
 
+        if not file_content or not file_content.strip():
+            return render(request, 'converter/dcat2iso.html', {'error': 'Die Datei ist leer.'})
+
         with tempfile.NamedTemporaryFile(suffix='.rdf', delete=False) as tmp_in:
             tmp_in.write(file_content)
+            tmp_in.flush()
+            os.fsync(tmp_in.fileno())
             tmp_in_path = tmp_in.name
 
         tmp_out_path = tmp_in_path + '_out.xml'
@@ -123,8 +258,7 @@ def convert_dcat2iso(request):
                 xslt_proc = proc.new_xslt30_processor()
                 xslt_proc.set_cwd(XSL_DIR)
                 executable = xslt_proc.compile_stylesheet(stylesheet_file=DCAT2ISO_XSL_PATH)
-                executable.set_initial_match_selection(file_name=tmp_in_path)
-                executable.apply_templates_returning_file(output_file=tmp_out_path)
+                executable.transform_to_file(source_file=tmp_in_path, output_file=tmp_out_path)
 
             with open(tmp_out_path, 'rb') as f:
                 xml_bytes = f.read()

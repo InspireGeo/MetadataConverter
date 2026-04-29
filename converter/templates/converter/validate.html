@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCAT-AP Validierung</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --color-primary: #2c6e49;
+      --color-primary-dark: #1f4f35;
+      --color-primary-light: #eef5f1;
+    }
+    body { background-color: #f4f6f4; min-height: 100vh; display: flex; flex-direction: column; }
+    .navbar { background: linear-gradient(135deg, var(--color-primary-dark), var(--color-primary)); }
+    .navbar-brand { font-weight: 600; letter-spacing: 0.5px; }
+    .hero {
+      background: linear-gradient(135deg, var(--color-primary-dark), var(--color-primary));
+      color: white;
+      padding: 2.5rem 0 2rem;
+      margin-bottom: 2rem;
+    }
+    .hero h1 { font-size: 1.8rem; font-weight: 700; }
+    .hero p { opacity: 0.85; font-size: 1rem; }
+    .upload-card {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .drop-zone {
+      border: 2px dashed #aac9b8;
+      border-radius: 10px;
+      background: var(--color-primary-light);
+      padding: 2.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--color-primary); background: #daeee4; }
+    .drop-zone i { font-size: 2.5rem; color: var(--color-primary); }
+    .drop-zone .file-name { font-size: 0.9rem; color: #555; margin-top: 0.5rem; }
+    .btn-validate {
+      background: var(--color-primary);
+      color: white;
+      font-weight: 600;
+      padding: 0.6rem 2rem;
+      border-radius: 8px;
+      border: none;
+    }
+    .btn-validate:hover { background: var(--color-primary-dark); color: white; }
+    .result-card {
+      background: white;
+      border-radius: 12px;
+      padding: 2rem;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    }
+    .badge-violation { background-color: #dc3545; }
+    .badge-warning { background-color: #fd7e14; }
+    .badge-ok { background-color: #2c6e49; }
+    .result-path { font-family: monospace; font-size: 0.85rem; background: #f0f0f0; padding: 2px 6px; border-radius: 4px; }
+    footer { margin-top: auto; background: #2a2a2a; color: #aaa; padding: 1rem 0; font-size: 0.85rem; text-align: center; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark">
+  <div class="container">
+    <a class="navbar-brand" href="{% url 'index' %}">
+      <i class="fa-solid fa-arrows-rotate me-2"></i>ISO2DCAT
+    </a>
+    <span class="text-white-50 small">DCAT-AP Validierung</span>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="container">
+    <nav aria-label="breadcrumb">
+      <ol class="breadcrumb mb-2" style="--bs-breadcrumb-divider-color: rgba(255,255,255,0.5); --bs-breadcrumb-item-active-color: white;">
+        <li class="breadcrumb-item"><a href="{% url 'index' %}" class="text-white-50 text-decoration-none">Startseite</a></li>
+        <li class="breadcrumb-item active">DCAT-AP Validierung</li>
+      </ol>
+    </nav>
+    <h1><i class="fa-solid fa-circle-check me-2"></i>DCAT-AP Validierung</h1>
+    <p class="mb-0">RDF/XML gegen DCAT-AP 3.0 SHACL-Regeln prüfen</p>
+  </div>
+</div>
+
+<div class="container" style="max-width: 800px;">
+
+  {% if error %}
+  <div class="alert alert-danger d-flex align-items-center mb-3" role="alert">
+    <i class="fa-solid fa-circle-exclamation me-2"></i>
+    <div>{{ error }}</div>
+  </div>
+  {% endif %}
+
+  <div class="upload-card mb-4">
+    <h5 class="fw-semibold mb-3"><i class="fa-solid fa-upload me-2 text-success"></i>DCAT-AP RDF/XML — Datei oder URL</h5>
+
+    <form method="post" action="{% url 'validate' %}" enctype="multipart/form-data" id="validateForm">
+      {% csrf_token %}
+
+      <ul class="nav nav-tabs mb-3" id="inputTabs">
+        <li class="nav-item">
+          <button class="nav-link active" type="button" id="tabFile" onclick="switchTab('file')">
+            <i class="fa-solid fa-file-arrow-up me-1"></i>Datei hochladen
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" type="button" id="tabUrl" onclick="switchTab('url')">
+            <i class="fa-solid fa-link me-1"></i>URL angeben
+          </button>
+        </li>
+      </ul>
+
+      <div id="panelFile">
+        <div class="drop-zone mb-3" id="dropZone">
+          <i class="fa-regular fa-file-code mb-2"></i>
+          <div>RDF/XML-Datei hierher ziehen oder <strong>klicken</strong></div>
+          <div class="file-name" id="fileName">Keine Datei ausgewählt</div>
+          <input type="file" name="rdf_file" id="fileInput" accept=".rdf,.xml" class="d-none">
+        </div>
+      </div>
+
+      <div id="panelUrl" style="display:none;">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">RDF/XML URL</label>
+          <input type="url" name="rdf_url" id="urlInput" class="form-control"
+                 placeholder="https://example.com/metadata.rdf">
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-end">
+        <button type="submit" class="btn btn-validate" id="submitBtn">
+          <i class="fa-solid fa-magnifying-glass me-2"></i>Validieren
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {% if conforms is not None %}
+  <div class="result-card mb-4">
+
+    {% if conforms %}
+    <div class="d-flex align-items-center mb-3">
+      <i class="fa-solid fa-circle-check fa-2x text-success me-3"></i>
+      <div>
+        <h5 class="mb-0 text-success fw-bold">Validierung erfolgreich</h5>
+        <div class="text-muted small">Alle DCAT-AP 3.0 SHACL-Regeln eingehalten</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="d-flex align-items-center mb-3">
+      <i class="fa-solid fa-circle-xmark fa-2x text-danger me-3"></i>
+      <div>
+        <h5 class="mb-0 text-danger fw-bold">Validierung fehlgeschlagen</h5>
+        <div class="text-muted small">DCAT-AP 3.0 SHACL-Regeln nicht vollständig eingehalten</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="d-flex gap-3 mb-4">
+      <span class="badge badge-violation fs-6 px-3 py-2">
+        <i class="fa-solid fa-xmark me-1"></i>{{ violation_count }} Fehler
+      </span>
+      <span class="badge badge-warning fs-6 px-3 py-2">
+        <i class="fa-solid fa-triangle-exclamation me-1"></i>{{ warning_count }} Warnungen
+      </span>
+      <span class="badge badge-ok fs-6 px-3 py-2">
+        <i class="fa-solid fa-check me-1"></i>{{ pass_count }} Bestanden
+      </span>
+    </div>
+
+    {% if violations %}
+    <h6 class="fw-semibold text-danger mb-2"><i class="fa-solid fa-xmark-circle me-1"></i>Fehler</h6>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm table-bordered">
+        <thead class="table-danger">
+          <tr>
+            <th>DCAT-Eigenschaft</th>
+            <th>Wert</th>
+            <th>Datensatz (URI)</th>
+            <th>Meldung</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in violations %}
+          <tr>
+            <td>
+              <span class="result-path">{{ v.path }}</span>
+              {% if v.path_uri %}
+              <div class="text-muted" style="font-size:0.75rem;">{{ v.path_uri }}</div>
+              {% endif %}
+            </td>
+            <td class="text-truncate" style="max-width:150px;" title="{{ v.value }}">
+              {% if v.value != '—' %}
+              <code>{{ v.value }}</code>
+              {% else %}
+              <span class="text-muted">kein Wert</span>
+              {% endif %}
+            </td>
+            <td class="text-truncate" style="max-width:180px;" title="{{ v.focus }}">
+              <span class="text-muted" style="font-size:0.8rem;">{{ v.focus }}</span>
+            </td>
+            <td>{{ v.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if warnings %}
+    <h6 class="fw-semibold text-warning mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>Warnungen</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered">
+        <thead class="table-warning">
+          <tr>
+            <th>DCAT-Eigenschaft</th>
+            <th>Wert</th>
+            <th>Datensatz (URI)</th>
+            <th>Meldung</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in warnings %}
+          <tr>
+            <td>
+              <span class="result-path">{{ w.path }}</span>
+              {% if w.path_uri %}
+              <div class="text-muted" style="font-size:0.75rem;">{{ w.path_uri }}</div>
+              {% endif %}
+            </td>
+            <td class="text-truncate" style="max-width:150px;" title="{{ w.value }}">
+              {% if w.value != '—' %}
+              <code>{{ w.value }}</code>
+              {% else %}
+              <span class="text-muted">kein Wert</span>
+              {% endif %}
+            </td>
+            <td class="text-truncate" style="max-width:180px;" title="{{ w.focus }}">
+              <span class="text-muted" style="font-size:0.8rem;">{{ w.focus }}</span>
+            </td>
+            <td>{{ w.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if passes %}
+    <h6 class="fw-semibold text-success mb-2"><i class="fa-solid fa-check-circle me-1"></i>Bestanden</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered">
+        <thead class="table-success">
+          <tr>
+            <th>DCAT-Eigenschaft</th>
+            <th>Wert</th>
+            <th>Datensatz (URI)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in passes %}
+          <tr>
+            <td>
+              <span class="result-path">{{ p.path }}</span>
+              <div class="text-muted" style="font-size:0.75rem;">{{ p.path_uri }}</div>
+            </td>
+            <td class="text-truncate" style="max-width:200px;" title="{{ p.value }}">
+              {% if p.value != '(kein Wert)' %}
+              <code>{{ p.value }}</code>
+              {% else %}
+              <span class="text-muted fst-italic">kein Wert</span>
+              {% endif %}
+            </td>
+            <td class="text-truncate" style="max-width:200px;" title="{{ p.focus }}">
+              <span class="text-muted" style="font-size:0.8rem;">{{ p.focus }}</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="text-muted small mt-3">
+      <i class="fa-solid fa-circle-info me-1"></i>
+      Validiert gegen <strong>DCAT-AP 3.0 SHACL</strong> (SEMICeu/DCAT-AP)
+    </div>
+
+  </div>
+  {% endif %}
+
+</div>
+
+<footer>ISO2DCAT &mdash; ISO 19139 zu DCAT-AP Konverter</footer>
+
+<script>
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const fileName  = document.getElementById('fileName');
+  const submitBtn = document.getElementById('submitBtn');
+  let activeTab = 'file';
+
+  function switchTab(tab) {
+    activeTab = tab;
+    document.getElementById('panelFile').style.display = tab === 'file' ? '' : 'none';
+    document.getElementById('panelUrl').style.display  = tab === 'url'  ? '' : 'none';
+    document.getElementById('tabFile').classList.toggle('active', tab === 'file');
+    document.getElementById('tabUrl').classList.toggle('active', tab === 'url');
+  }
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) fileName.textContent = fileInput.files[0].name;
+  });
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      fileInput.files = e.dataTransfer.files;
+      fileName.textContent = e.dataTransfer.files[0].name;
+    }
+  });
+
+  document.getElementById('validateForm').addEventListener('submit', (e) => {
+    if (activeTab === 'file' && fileInput.files.length === 0) {
+      e.preventDefault(); alert('Bitte eine RDF-Datei auswählen.'); return;
+    }
+    if (activeTab === 'url' && !document.getElementById('urlInput').value.trim()) {
+      e.preventDefault(); alert('Bitte eine URL eingeben.'); return;
+    }
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-2"></i>Wird validiert...';
+  });
+</script>
+
+</body>
+</html>
