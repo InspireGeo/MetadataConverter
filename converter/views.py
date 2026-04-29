@@ -12,7 +12,7 @@ from rdflib import Graph, RDF, URIRef, BNode, Namespace
 from lxml import etree
 
 XSL_DIR = os.path.join(os.path.dirname(__file__), 'xsl')
-ISO2DCAT_XSL_PATH = os.path.join(XSL_DIR, 'geodcat-ap.xsl')
+ISO2DCAT_XSL_PATH = os.path.join(XSL_DIR, 'iso-19139-to-dcat-ap.xsl')
 DCAT2ISO_XSL_PATH = os.path.join(XSL_DIR, 'dcat2iso.xsl')
 SHACL_PATH = os.path.join(os.path.dirname(__file__), 'shacl', 'dcat-ap-SHACL.ttl')
 
@@ -81,7 +81,7 @@ def _run_shacl(rdf_bytes):
         shacl_graph=SHACL_PATH,
         data_graph_format='xml',
         shacl_graph_format='turtle',
-        inference='none',
+        inference='rdfs',
         abort_on_first=False,
     )
 
@@ -245,6 +245,8 @@ def convert_iso2dcat(request):
                 xslt_proc.set_cwd(XSL_DIR)
                 executable = xslt_proc.compile_stylesheet(stylesheet_file=ISO2DCAT_XSL_PATH)
                 executable.set_parameter('profile', proc.make_string_value('core'))
+                executable.set_parameter('CoupledResourceLookUp', proc.make_string_value('disabled'))
+                executable.set_parameter('include-deprecated', proc.make_string_value('no'))
                 executable.transform_to_file(source_file=tmp_in_path, output_file=tmp_out_path)
 
             with open(tmp_out_path, 'rb') as f:
@@ -254,7 +256,7 @@ def convert_iso2dcat(request):
             if os.path.exists(tmp_out_path):
                 os.unlink(tmp_out_path)
 
-        filename = base_name + '_geodcat.rdf'
+        filename = base_name + '_dcat.rdf'
         response = HttpResponse(rdf_bytes, content_type='application/rdf+xml')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response.set_cookie('fileDownload', 'true', max_age=60)
